@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "pong-diffusion"
+version = "0.1.0"
+description = "Pong on Diffusion"
+authors = ["Abhay Shukla <abhayshuklaistheone@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.scripts]
+train_rl = "src.models.train_rl:main"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pygame = "^2.6.1"
+numpy = "^2.2.1"
+torch = "^2.5.1"
+matplotlib = "^3.10.0"
+pyyaml = "^6.0.2"
+click = "^8.1.8"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,15 @@
+policy_agent:
+  max_memory: 100000
+  batch_size: 1000
+  lr: 1.0e-2
+  hidden_state: 5490
+  value_for_end_game:
+    __type__: src.models.rl_agent.agent.ValueForEndGame
+    value: "last_action"
+  iterations: 80000
+  min_deaths_to_record: 60
+
+env: 
+  __type__: PongGame.env.GameEnvironment
+  game:
+    __type__: PongGame.game.PongGame
