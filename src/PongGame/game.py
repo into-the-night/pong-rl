@@ -96,6 +96,9 @@ class PongGame:
         self.opponent = Paddle(10, HEIGHT // 2 - PADDLE_HEIGHT // 2)
         self.ball = Ball(WIDTH // 2 - BALL_SIZE // 2, HEIGHT // 2 - BALL_SIZE // 2)
 
+    def ball_reset(self):
+        self.ball = Ball(WIDTH // 2 - BALL_SIZE // 2, HEIGHT // 2 - BALL_SIZE // 2)
+
     def draw(self):
         self.screen.fill(BLACK)
         self.player.draw(self.screen)
@@ -140,9 +143,7 @@ class PongGame:
             step = self.get_step_from_event(event)
             self._move(step)
 
-        if value is not None:
-            # print(f"This is move: {value}")
-            
+        if value is not None:          
             if isinstance(value, int) or isinstance(value, np.int64):
                 self.player.direction = self.get_step_from_int(value)
             else:
@@ -160,9 +161,15 @@ class PongGame:
 
         game_over = False
         if self.ball.rect.left <= 0:
-            self.score += 2
-            game_over = True
+            self.score += 1
+            self.ball_reset()
+            # game_over = True
         if self.ball.rect.left >= WIDTH:
+            self.score -= 1
+            self.ball_reset()
+            # game_over = True
+
+        if self.score <= -4:
             game_over = True
 
         self.draw()

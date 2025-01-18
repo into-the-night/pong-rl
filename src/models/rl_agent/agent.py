@@ -86,13 +86,12 @@ class PolicyAgent:
         return os.path.join(self.dataset_path, "actions")
 
     def _get_action(self, state: np.ndarray) -> Tuple[np.ndarray, int]:
-        with torch.no_grad():
-            state_tensor = torch.tensor(state, dtype=torch.float)
-            prob = self.model(state_tensor)
-            if np.random.uniform() < self.epsilon:
-                action = random.randint(0, 1)
-            else:
-                action = 1 if np.random.uniform() < prob else 0
+        state_tensor = torch.tensor(state, dtype=torch.float, requires_grad=True)
+        prob = self.model(state_tensor)
+        if np.random.uniform() < self.epsilon:
+            action = random.randint(0, 1)
+        else:
+            action = 1 if np.random.uniform() < prob else 0
         return prob, action
     
     def _save_snapshot(self, step: int):
@@ -140,12 +139,12 @@ class PolicyAgent:
             # self.memory.push(old_state, action, result.reward, result.new_state, result.terminated)
             # print(f"This is reward {reward} for action {action}")
             states.append(old_state)
-            losses.append(action - prob)
+            losses.append(torch.tensor(action, dtype=prob.dtype,) - prob)
             rewards.append(reward)
 
             def do_training(states: List, losses: List, rewards: List):
                 states = torch.Tensor(np.vstack(states))
-                losses = torch.Tensor(np.vstack(losses))
+                losses = torch.stack(losses)
                 rewards = torch.Tensor(np.vstack(rewards))
                 self.trainer.train_step(states, losses, rewards, done)
 

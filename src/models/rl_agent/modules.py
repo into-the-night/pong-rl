@@ -51,10 +51,16 @@ class PolicyTrainer:
     ):
         self.optimizer.zero_grad()
         discounted_rewards = self.get_rewards(rewards)
-        losses *= discounted_rewards
-        if isinstance(losses, torch.Tensor):
-            losses = losses.clone().detach().requires_grad_(True)
-        mean_loss = losses.mean()
-        print(f"This is loss: {mean_loss}")
-        mean_loss.backward()
+        if not isinstance(discounted_rewards, torch.Tensor):
+            discounted_rewards = torch.tensor(discounted_rewards, dtype=losses.dtype)
+        # Scale losses by discounted rewards
+        losses = losses * discounted_rewards
+        # Normalize losses
+        losses = (losses - losses.mean()) / (losses.std() + 1e-8)
+        loss = torch.sum(losses)
+        # if isinstance(losses, torch.Tensor):
+        #     losses = losses.clone().detach().requires_grad_(True)
+        # mean_loss = losses.mean()
+        print(f"This is loss: {loss}")
+        loss.backward()
         self.optimizer.step()

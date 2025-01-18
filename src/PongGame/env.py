@@ -44,11 +44,11 @@ class GameEnvironment():
         game_over, score = self.game.play_step(action)
         reward = 0
         if game_over:
-            reward = -10
+            reward = -1
         elif score > prev_score:
-            reward = score
-        else:
-            reward = -5
+            reward = +1
+        elif score < prev_score:
+            reward = -1
         
         return reward, game_over
 
