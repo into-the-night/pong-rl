@@ -19,7 +19,7 @@ class GameEnvironment():
         game.reset()
 
     def actions_length(self) -> int:
-        return 1
+        return 2
 
     def reset(self):
         self.game.reset()

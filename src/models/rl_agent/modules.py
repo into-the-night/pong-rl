@@ -13,11 +13,10 @@ class PolicyNetwork(nn.Module):
         nn.init.xavier_uniform_(self.conv1d.weight)
         self.flatten = nn.Flatten()
         self.relu = nn.ReLU()
-        self.linear2 = nn.Linear(hidden_size, output_size)
+        self.linear2 = nn.Linear(hidden_size, output_size, bias=False)
 
     def forward(self, x):
         x = x[60:,20:]
-        x = x.unsqueeze(0)
         h = self.conv1d(x)
         h = h.view(h.size(0), -1)
         logp = self.linear2(F.relu(h))
@@ -54,9 +53,9 @@ class PolicyTrainer:
         if not isinstance(discounted_rewards, torch.Tensor):
             discounted_rewards = torch.tensor(discounted_rewards, dtype=losses.dtype)
         # Scale losses by discounted rewards
-        losses = losses * discounted_rewards
+        losses = torch.mul(losses, discounted_rewards).mul(-1)
         # Normalize losses
-        losses = (losses - losses.mean()) / (losses.std() + 1e-8)
+        # losses = (losses - losses.mean()) / (losses.std() + 1e-8)
         loss = torch.sum(losses)
         # if isinstance(losses, torch.Tensor):
         #     losses = losses.clone().detach().requires_grad_(True)

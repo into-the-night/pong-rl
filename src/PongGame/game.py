@@ -2,6 +2,7 @@ import pygame
 from enum import Enum
 from typing import Optional, Union, List
 import numpy as np
+import torch
 
 # Initialize Pygame
 pygame.init()
@@ -120,17 +121,16 @@ class PongGame:
                 return Direction.DOWN
         return Direction.STOP
 
-    def get_step_from_list(self, values: np.ndarray) -> Direction:
-        new_move = values.argmax()
-        if new_move in [0, 1]:
-            return Direction(new_move)
+    def get_step_from_tensor(self, value: torch.Tensor) -> Direction:
+        if value in [0, 1]:
+            return Direction(value.item())
         return Direction.STOP
     
     def get_step_from_int(self, value: int) -> Direction:
         if value in [0, 1]:
             return Direction(value)
         return Direction.STOP
-    
+
     def _move(self, step: Direction):
         self.player.move(step)
         self.player.direction = step
@@ -147,15 +147,14 @@ class PongGame:
             if isinstance(value, int) or isinstance(value, np.int64):
                 self.player.direction = self.get_step_from_int(value)
             else:
-                self.player.direction = self.get_step_from_list(value)
-
+                self.player.direction = self.get_step_from_tensor(value)
         self._move(self.player.direction)
         self.ball.move()
 
-        if self.ball.check_collision(self.player):
-            self.score += 1
+        # if self.ball.check_collision(self.player):
+        #     self.score += 1
 
-        if self.ball.check_collision(self.opponent):
+        if self.ball.check_collision(self.opponent) or self.ball.check_collision(self.player):
             self.ball.speed_x += np.random.random()
             self.ball.speed_y += np.random.random()
 

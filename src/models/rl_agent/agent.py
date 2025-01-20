@@ -7,10 +7,11 @@ from enum import Enum
 from pathlib import Path
 import shutil
 
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 import torch.optim as optim
+from torch.distributions import Categorical
 
 from src.models.rl_agent.modules import PolicyNetwork, PolicyTrainer
 from src.PongGame.env import ActionResult, GameEnvironment
@@ -88,11 +89,12 @@ class PolicyAgent:
     def _get_action(self, state: np.ndarray) -> Tuple[np.ndarray, int]:
         state_tensor = torch.tensor(state, dtype=torch.float, requires_grad=True)
         prob = self.model(state_tensor)
+        c = Categorical(prob+1e-8)
         if np.random.uniform() < self.epsilon:
-            action = random.randint(0, 1)
+            action = torch.tensor(random.randint(0, 1))
         else:
-            action = 1 if np.random.uniform() < prob else 0
-        return prob, action
+            action = c.sample()
+        return action, c
     
     def _save_snapshot(self, step: int):
         plt.imsave(os.path.join(self.snapshots_path, f'{step}.jpg'), self.env.get_snapshot())
@@ -107,17 +109,16 @@ class PolicyAgent:
         step: Optional[int] = None
     ) -> Tuple[np.ndarray, np.ndarray, ActionResult]:
         old_state = self.env.get_state()
-        prob, action = self._get_action(old_state)
+        action, c = self._get_action(old_state)
         self.steps += 1
         if step is None:
             step = self.steps
         result = self.env.do_action(action)
-        # print(result.reward)
         if record:
             self._save_snapshot(step)
             self.recorded_actions.append(action)
             self._save_actions()
-        return old_state, action, result, prob
+        return old_state, action, result, c
 
     def train(self, show_plot: bool = False, record: bool = False, clear_old: bool = False):
         self._setup_training(clear_old)
@@ -132,14 +133,12 @@ class PolicyAgent:
         if self.begin_iteration >= self.config.iterations:
             return
         for iteration in range(self.begin_iteration, self.config.iterations):
-            old_state, action, result, prob = self.play_step(
+            old_state, action, result, c = self.play_step(
                 record=record and self.count_games >= self.config.min_deaths_to_record
             )
             reward, new_state, done = result.reward, result.new_state, result.terminated
-            # self.memory.push(old_state, action, result.reward, result.new_state, result.terminated)
-            # print(f"This is reward {reward} for action {action}")
             states.append(old_state)
-            losses.append(torch.tensor(action, dtype=prob.dtype,) - prob)
+            losses.append(c.log_prob(action))
             rewards.append(reward)
 
             def do_training(states: List, losses: List, rewards: List):
@@ -148,15 +147,17 @@ class PolicyAgent:
                 rewards = torch.Tensor(np.vstack(rewards))
                 self.trainer.train_step(states, losses, rewards, done)
 
+            if len(rewards) > self.config.batch_size and iteration % self.config.train_every_iteration == 0:
+                do_training(states, losses, rewards)
+                states, losses, rewards = [],[],[]
+
             self.epsilon = max(self.config.epsilon_min, self.epsilon * self.config.epsilon_decay)
             if done:
                 self.count_games += 1
                 score = result.score
                 self.env.reset()
                 do_training(states, losses, rewards)
-                # for name, param in self.model.named_parameters():
-                    # if param.requires_grad and param.grad:
-                    #     print(name, param.grad.norm())
+
                 if record and self.count_games > self.config.min_deaths_to_record:
                     if self.config.value_for_end_game.value == ValueForEndGame.last_action.value:
                         self.steps += 1
