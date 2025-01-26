@@ -1,4 +1,3 @@
-from collections import deque
 from typing import Union, Tuple, List, Optional
 import random
 import os
@@ -15,6 +14,8 @@ from torch.distributions import Categorical
 
 from src.models.rl_agent.modules import PolicyNetwork, PolicyTrainer
 from src.PongGame.env import ActionResult, GameEnvironment
+
+np.random.seed(42)
 
 def plot(scores, mean_scores):
     plt.clf()
@@ -46,7 +47,7 @@ class PolicyAgentConfig:
     epsilon_min: float = 0.01
     epsilon_decay: float = 0.995
     alpha: float = 0.9
-    gamma: float = 0.9
+    gamma: float = 0.95
     train_every_iteration: int = 10
     save_every_iteration: Optional[int] = None
 
@@ -87,14 +88,13 @@ class PolicyAgent:
         return os.path.join(self.dataset_path, "actions")
 
     def _get_action(self, state: np.ndarray) -> Tuple[np.ndarray, int]:
-        state_tensor = torch.tensor(state, dtype=torch.float, requires_grad=True)
-        prob = self.model(state_tensor)
-        c = Categorical(prob+1e-8)
+        prob = self.model(state)
+        c = Categorical(prob)
         if np.random.uniform() < self.epsilon:
             action = torch.tensor(random.randint(0, 1))
         else:
             action = c.sample()
-        return action, c
+        return action, c, prob
     
     def _save_snapshot(self, step: int):
         plt.imsave(os.path.join(self.snapshots_path, f'{step}.jpg'), self.env.get_snapshot())
@@ -109,7 +109,8 @@ class PolicyAgent:
         step: Optional[int] = None
     ) -> Tuple[np.ndarray, np.ndarray, ActionResult]:
         old_state = self.env.get_state()
-        action, c = self._get_action(old_state)
+        action, c, prob = self._get_action(old_state)
+        
         self.steps += 1
         if step is None:
             step = self.steps
@@ -118,7 +119,7 @@ class PolicyAgent:
             self._save_snapshot(step)
             self.recorded_actions.append(action)
             self._save_actions()
-        return old_state, action, result, c
+        return old_state, action, result, c, prob
 
     def train(self, show_plot: bool = False, record: bool = False, clear_old: bool = False):
         self._setup_training(clear_old)
@@ -133,12 +134,12 @@ class PolicyAgent:
         if self.begin_iteration >= self.config.iterations:
             return
         for iteration in range(self.begin_iteration, self.config.iterations):
-            old_state, action, result, c = self.play_step(
+            old_state, action, result, c, prob = self.play_step(
                 record=record and self.count_games >= self.config.min_deaths_to_record
             )
             reward, new_state, done = result.reward, result.new_state, result.terminated
             states.append(old_state)
-            losses.append(c.log_prob(action))
+            losses.append(action - prob)
             rewards.append(reward)
 
             def do_training(states: List, losses: List, rewards: List):
@@ -156,7 +157,7 @@ class PolicyAgent:
                 self.count_games += 1
                 score = result.score
                 self.env.reset()
-                do_training(states, losses, rewards)
+                # do_training(states, losses, rewards)
 
                 if record and self.count_games > self.config.min_deaths_to_record:
                     if self.config.value_for_end_game.value == ValueForEndGame.last_action.value:
@@ -167,7 +168,7 @@ class PolicyAgent:
                         pass
                 self._save_actions()
 
-                states, losses, rewards = [],[],[]
+                # states, losses, rewards = [],[],[]
                 if score > top_result:
                     top_result = score
                     self.save_agent(iteration)

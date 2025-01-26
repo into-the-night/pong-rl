@@ -8,7 +8,7 @@ import torch
 pygame.init()
 
 # Screen dimensions
-WIDTH, HEIGHT = 800, 600
+WIDTH, HEIGHT = 400, 300
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Pong Game")
 
@@ -17,10 +17,10 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 # Paddle dimensions
-PADDLE_WIDTH, PADDLE_HEIGHT = 10, 100
+PADDLE_WIDTH, PADDLE_HEIGHT = 5, 50
 
 # Ball dimensions
-BALL_SIZE = 20
+BALL_SIZE = 10
 
 # Paddle positions
 player_x, player_y = WIDTH - 20, HEIGHT // 2 - PADDLE_HEIGHT // 2
@@ -36,7 +36,7 @@ class Direction(Enum):
 class Paddle:
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, PADDLE_WIDTH, PADDLE_HEIGHT)
-        self.speed = 7
+        self.speed = 4
         self.direction = Direction.STOP
 
     def move(self, step: Direction):
@@ -49,11 +49,20 @@ class Paddle:
             self.rect.y += 0
 
     def ai_move(self, ball):
-        if self.rect.centery < ball.rect.centery:
-            self.rect.y += self.speed
+        # Add randomness and delay to make AI less perfect
+        if np.random.random() < 0.1:  # 10% chance to make a mistake
+            return  # Skip movement occasionally
+        
+        # Add some prediction error
+        error = np.random.randint(-30, 30)
+        target_y = ball.rect.centery + error
+        
+        # Slower reaction speed
+        if self.rect.centery < target_y:
+            self.rect.y += self.speed * 0.7  # Reduced speed
             self.direction = Direction.UP
-        if self.rect.centery > ball.rect.centery:
-            self.rect.y -= self.speed
+        if self.rect.centery > target_y:
+            self.rect.y -= self.speed * 0.7  # Reduced speed
             self.direction = Direction.DOWN
 
     def draw(self, screen):
@@ -63,8 +72,8 @@ class Paddle:
 class Ball:
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, BALL_SIZE, BALL_SIZE)
-        self.speed_x = 3
-        self.speed_y = 3
+        self.speed_x = 2
+        self.speed_y = 2
 
     def move(self):
         self.rect.x += self.speed_x
@@ -107,7 +116,7 @@ class PongGame:
         self.ball.draw(self.screen)
         score_text = self.font.render(str(self.score), True, WHITE)
         pygame.draw.aaline(self.screen, WHITE, (WIDTH // 2, score_text.get_width()*2), (WIDTH // 2, HEIGHT))
-        self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, 10))
+        # self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, 10))
         pygame.display.flip()
 
     def get_snapshot(self) -> np.ndarray:
@@ -143,28 +152,34 @@ class PongGame:
             step = self.get_step_from_event(event)
             self._move(step)
 
-        if value is not None:          
+        if value is not None:
             if isinstance(value, int) or isinstance(value, np.int64):
                 self.player.direction = self.get_step_from_int(value)
             else:
                 self.player.direction = self.get_step_from_tensor(value)
         self._move(self.player.direction)
         self.ball.move()
+        
+        reward = 0
+        if self.ball.rect.centery in range(self.player.rect.centery - PADDLE_HEIGHT//2, self.player.rect.centery + PADDLE_HEIGHT//2):
+            reward += 0.1
 
-        # if self.ball.check_collision(self.player):
-        #     self.score += 1
+        if self.ball.check_collision(self.player):
+            reward += 0.5
 
-        if self.ball.check_collision(self.opponent) or self.ball.check_collision(self.player):
+        if self.ball.check_collision(self.opponent):
             self.ball.speed_x += np.random.random()
             self.ball.speed_y += np.random.random()
 
         game_over = False
         if self.ball.rect.left <= 0:
             self.score += 1
+            reward += 1
             self.ball_reset()
             # game_over = True
         if self.ball.rect.left >= WIDTH:
             self.score -= 1
+            reward -= 1
             self.ball_reset()
             # game_over = True
 
@@ -174,7 +189,7 @@ class PongGame:
         self.draw()
         self.clock.tick(60)
         
-        return game_over, self.score
+        return game_over, reward
 
     def draw_game_over(self):
         font = pygame.font.Font(None, self.block_size)

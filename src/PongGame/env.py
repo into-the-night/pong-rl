@@ -1,7 +1,7 @@
 from typing import Tuple, Union, List
 from dataclasses import dataclass
 import numpy as np
-
+import torch
 from src.PongGame.game import PongGame, Direction
 
 @dataclass
@@ -35,21 +35,15 @@ class GameEnvironment():
         reward, terminated = self._take_action(action)
         return ActionResult(self.get_state(), reward, terminated, self.game.score)
     
-    def get_state(self) -> np.ndarray:
+    def get_state(self) -> torch.Tensor:
         state = self.game.get_snapshot()
-        return np.array(state)
+        state = state[::2, ::2]
+        # print(state.shape)
+        return torch.Tensor(state).ravel()
 
     def _take_action(self, action: np.ndarray) -> Tuple[int, bool]:
         prev_score = self.game.score
-        game_over, score = self.game.play_step(action)
-        reward = 0
-        if game_over:
-            reward = -1
-        elif score > prev_score:
-            reward = +1
-        elif score < prev_score:
-            reward = -1
-        
+        game_over, reward = self.game.play_step(action)
         return reward, game_over
 
 if __name__ == '__main__':
