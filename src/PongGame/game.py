@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Optional, Union, List
 import numpy as np
 import torch
+import random
 
 # Initialize Pygame
 pygame.init()
@@ -72,8 +73,11 @@ class Paddle:
 class Ball:
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, BALL_SIZE, BALL_SIZE)
-        self.speed_x = 2
-        self.speed_y = 2
+        self.speed_x, self.speed_y = self._init_speed()
+
+    def _init_speed(self):
+        speed = 2 if random.randint(0,1) < 0.5 else -2
+        return speed, speed
 
     def move(self):
         self.rect.x += self.speed_x
@@ -115,8 +119,7 @@ class PongGame:
         self.opponent.draw(self.screen)
         self.ball.draw(self.screen)
         score_text = self.font.render(str(self.score), True, WHITE)
-        pygame.draw.aaline(self.screen, WHITE, (WIDTH // 2, score_text.get_width()*2), (WIDTH // 2, HEIGHT))
-        # self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, 10))
+        pygame.draw.aaline(self.screen, WHITE, (WIDTH // 2, 0), (WIDTH // 2, HEIGHT))
         pygame.display.flip()
 
     def get_snapshot(self) -> np.ndarray:
@@ -162,10 +165,11 @@ class PongGame:
         
         reward = 0
         if self.ball.rect.centery in range(self.player.rect.centery - PADDLE_HEIGHT//2, self.player.rect.centery + PADDLE_HEIGHT//2):
-            reward += 0.1
+            reward += 0.01
 
         if self.ball.check_collision(self.player):
-            reward += 0.5
+            # reward += 0.5
+            pass
 
         if self.ball.check_collision(self.opponent):
             self.ball.speed_x += np.random.random()
@@ -176,14 +180,12 @@ class PongGame:
             self.score += 1
             reward += 1
             self.ball_reset()
-            # game_over = True
         if self.ball.rect.left >= WIDTH:
             self.score -= 1
             reward -= 1
             self.ball_reset()
-            # game_over = True
 
-        if self.score <= -4:
+        if abs(self.score) >= 4:
             game_over = True
 
         self.draw()

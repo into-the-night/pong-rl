@@ -6,33 +6,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-np.random.seed(42)
 
 class PolicyNetwork(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size: int):
         super().__init__()
-        # self.conv1d = nn.Conv1d(in_channels=800, out_channels=10, kernel_size=32, bias=False)
         self.linear1 = nn.Linear(input_size, hidden_size, bias=False)
         nn.init.xavier_uniform_(self.linear1.weight)
-        self.flatten = nn.Flatten()
-        self.dropout = nn.Dropout()
+        self.dropout = nn.Dropout(0.3)
         self.relu = nn.ReLU()
         self.linear2 = nn.Linear(hidden_size, output_size, bias=False)
 
     def forward(self, x):
-        # x = x[60:,20:]
-        # h = self.conv1d(x)
-        # h = h.view(h.size(0), -1)
-        # print(x.shape)
         h = self.linear1(x)
-        # print(h.shape)
-        # h = self.dropout(h) 
-        
-        # print(h.shape)
+        h = self.dropout(h) 
         p = self.linear2(F.relu(h))
-        # print(logp.shape)
         p = F.softmax(p, dim=-1) + 1e-8
-        # print(p.shape)
         return p.ravel()
 
 
@@ -67,11 +55,8 @@ class PolicyTrainer:
         # Scale losses by discounted rewards
         losses = torch.mul(losses, discounted_rewards)
         # Normalize losses
-        # losses = (losses - losses.mean()) / (losses.std() + 1e-8)
+        losses = (losses - losses.mean()) / (losses.std() + 1e-8)
         loss = torch.sum(losses)
-        # if isinstance(losses, torch.Tensor):
-        #     losses = losses.clone().detach().requires_grad_(True)
-        # mean_loss = losses.mean()
         print(f"This is loss: {loss}")
         print(f"This is reward: {rewards.sum()}")
         loss.backward()

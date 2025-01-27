@@ -15,7 +15,6 @@ from torch.distributions import Categorical
 from src.models.rl_agent.modules import PolicyNetwork, PolicyTrainer
 from src.PongGame.env import ActionResult, GameEnvironment
 
-np.random.seed(42)
 
 def plot(scores, mean_scores):
     plt.clf()
@@ -43,7 +42,7 @@ class PolicyAgentConfig:
     iterations: int
     min_deaths_to_record: int
     lr: float = 0.01
-    epsilon_start: float = 1.0
+    epsilon_start: float = 0.6
     epsilon_min: float = 0.01
     epsilon_decay: float = 0.995
     alpha: float = 0.9
@@ -157,7 +156,6 @@ class PolicyAgent:
                 self.count_games += 1
                 score = result.score
                 self.env.reset()
-                # do_training(states, losses, rewards)
 
                 if record and self.count_games > self.config.min_deaths_to_record:
                     if self.config.value_for_end_game.value == ValueForEndGame.last_action.value:
@@ -168,7 +166,6 @@ class PolicyAgent:
                         pass
                 self._save_actions()
 
-                # states, losses, rewards = [],[],[]
                 if score > top_result:
                     top_result = score
                     self.save_agent(iteration)
