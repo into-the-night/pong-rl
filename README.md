@@ -1,5 +1,17 @@
-# pong-rl (in-progress)
+# pong-rl 🏓
  RL for Pong using pytorch
+
+## Built With 🛠
+- Pygame for building the base game
+- Pytorch for the RL agent and modules
+
+## How to train 🏃‍♀️
+```
+poetry shell
+poetry install
+$env:PYTHONPATH=pwd
+python src/train_rl.py
+```
 
 ## References 📝
 [snake-diffusion by @juraam](https://github.com/juraam/snake-diffusion/)
