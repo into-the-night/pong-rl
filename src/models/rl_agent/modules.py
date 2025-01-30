@@ -53,7 +53,7 @@ class PolicyTrainer:
         if not isinstance(discounted_rewards, torch.Tensor):
             discounted_rewards = torch.tensor(discounted_rewards, dtype=losses.dtype)
         # Scale losses by discounted rewards
-        losses = torch.mul(losses, discounted_rewards)
+        losses = torch.mul(losses, discounted_rewards).mul(-1)
         # Normalize losses
         losses = (losses - losses.mean()) / (losses.std() + 1e-8)
         loss = torch.sum(losses)

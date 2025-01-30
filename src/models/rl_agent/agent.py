@@ -138,7 +138,7 @@ class PolicyAgent:
             )
             reward, new_state, done = result.reward, result.new_state, result.terminated
             states.append(old_state)
-            losses.append(action - prob)
+            losses.append(c.log_prob(action))
             rewards.append(reward)
 
             def do_training(states: List, losses: List, rewards: List):
@@ -147,7 +147,7 @@ class PolicyAgent:
                 rewards = torch.Tensor(np.vstack(rewards))
                 self.trainer.train_step(states, losses, rewards, done)
 
-            if len(rewards) > self.config.batch_size and iteration % self.config.train_every_iteration == 0:
+            if len(states) > self.config.batch_size and iteration % self.config.train_every_iteration == 0:
                 do_training(states, losses, rewards)
                 states, losses, rewards = [],[],[]
 
