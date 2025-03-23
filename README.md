@@ -1,5 +1,7 @@
 # pong-rl 🏓
  RL for Pong using pytorch
+ 
+ Want to know how this works? Read more on my [substack ;)](https://abhayshukla.substack.com/p/making-my-dumb-laptop-learn-pong)
 
 ## Built With 🛠
 - Pygame for building the base game
