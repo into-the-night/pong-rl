@@ -2,7 +2,7 @@ from typing import Tuple, Union, List
 from dataclasses import dataclass
 import numpy as np
 import torch
-from src.PongGame.game import PongGame, Direction
+from PongGame.game import PongGame, Direction
 
 @dataclass
 class ActionResult:
@@ -26,7 +26,8 @@ class GameEnvironment():
         self.steps_taken = 0
 
     def get_snapshot(self) -> np.ndarray:
-        return self.game.get_snapshot().transpose(1,0,2)
+        # Returns (140, 100) grayscale array
+        return self.game.get_snapshot()
 
     def do_action(self, action: np.ndarray) -> ActionResult:
         self.steps_taken += 1
@@ -36,10 +37,10 @@ class GameEnvironment():
         return ActionResult(self.get_state(), reward, terminated, self.game.score)
     
     def get_state(self) -> torch.Tensor:
-        state = self.game.get_snapshot()
-        state = state[::2, ::2]
-        # print(state.shape)
-        return torch.Tensor(state).ravel()
+        state = self.game.get_snapshot()  # (140, 100) grayscale
+        state = state[::2, ::2]  # Downsample to (70, 50)
+        # Normalize pixel values (0-255) to 0-1 range
+        return torch.Tensor(state / 255.0).ravel()
 
     def _take_action(self, action: np.ndarray) -> Tuple[int, bool]:
         prev_score = self.game.score

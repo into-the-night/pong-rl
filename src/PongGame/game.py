@@ -9,7 +9,7 @@ import random
 pygame.init()
 
 # Screen dimensions
-WIDTH, HEIGHT = 400, 300
+WIDTH, HEIGHT = 140, 100
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Pong Game")
 
@@ -18,10 +18,10 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 # Paddle dimensions
-PADDLE_WIDTH, PADDLE_HEIGHT = 5, 50
+PADDLE_WIDTH, PADDLE_HEIGHT = 4, 14
 
 # Ball dimensions
-BALL_SIZE = 10
+BALL_SIZE = 5
 
 # Paddle positions
 player_x, player_y = WIDTH - 20, HEIGHT // 2 - PADDLE_HEIGHT // 2
@@ -55,8 +55,7 @@ class Paddle:
             return  # Skip movement occasionally
         
         # Add some prediction error
-        error = np.random.randint(-30, 30)
-        target_y = ball.rect.centery + error
+        target_y = ball.rect.centery
         
         # Slower reaction speed
         if self.rect.centery < target_y:
@@ -76,7 +75,8 @@ class Ball:
         self.speed_x, self.speed_y = self._init_speed()
 
     def _init_speed(self):
-        speed = 2 if random.randint(0,1) < 0.5 else -2
+        # speed = 1 if random.randint(0,1) < 0.5 else -1
+        speed = 1
         return speed, speed
 
     def move(self):
@@ -123,7 +123,12 @@ class PongGame:
         pygame.display.flip()
 
     def get_snapshot(self) -> np.ndarray:
-        return pygame.surfarray.array2d(self.screen)
+        # Get RGB array (width x height x 3)
+        rgb_array = pygame.surfarray.array3d(self.screen)
+        # Convert to grayscale using standard luminosity method
+        # Formula: 0.299*R + 0.587*G + 0.114*B
+        grayscale = np.dot(rgb_array[..., :3], [0.299, 0.587, 0.114])
+        return grayscale.astype(np.uint8)  # Returns (140, 100) shape
 
     def get_step_from_event(self, event: pygame.event.Event) -> Direction:
         if event.type == pygame.KEYDOWN:
@@ -168,7 +173,7 @@ class PongGame:
             reward += 0.01
 
         if self.ball.check_collision(self.player):
-            # reward += 0.5
+            # reward += 0.25
             pass
 
         if self.ball.check_collision(self.opponent):

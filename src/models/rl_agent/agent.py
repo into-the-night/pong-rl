@@ -12,8 +12,8 @@ import torch
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from src.models.rl_agent.modules import PolicyNetwork, PolicyTrainer
-from src.PongGame.env import ActionResult, GameEnvironment
+from models.rl_agent.modules import PolicyNetwork, PolicyTrainer
+from PongGame.env import ActionResult, GameEnvironment
 
 
 def plot(scores, mean_scores):
@@ -67,7 +67,7 @@ class PolicyAgent:
         self.steps = 0
         self.dataset_path = dataset_path
         self.count_games = 0
-        self.optimizer = optim.RMSprop(self.model.parameters(), lr=config.lr, alpha=config.alpha)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config.lr)
         self.recorded_actions = []
         self.epsilon = config.epsilon_start
         self.begin_iteration = 0
@@ -89,10 +89,10 @@ class PolicyAgent:
     def _get_action(self, state: np.ndarray) -> Tuple[np.ndarray, int]:
         prob = self.model(state)
         c = Categorical(prob)
-        if np.random.uniform() < self.epsilon:
-            action = torch.tensor(random.randint(0, 1))
-        else:
-            action = c.sample()
+        # if np.random.uniform() < self.epsilon:
+        #     action = torch.tensor(random.randint(0, 1))
+        # else:
+        action = c.sample()
         return action, c, prob
     
     def _save_snapshot(self, step: int):
@@ -114,6 +114,11 @@ class PolicyAgent:
         if step is None:
             step = self.steps
         result = self.env.do_action(action)
+        
+        # Debug: Print probabilities occasionally to check for mode collapse
+        if self.steps % 100 == 0:
+            print(f"Step {self.steps} Probs: {prob.detach().numpy()}")
+
         if record:
             self._save_snapshot(step)
             self.recorded_actions.append(action)
@@ -127,7 +132,7 @@ class PolicyAgent:
         plot_mean_scores = []
         top_result = 0
         total_score = 0
-        states, losses, rewards = [],[],[]
+        states, losses, rewards, dones = [],[],[],[]
         print(f"Begin iteration is {self.begin_iteration}")
         print(f"All iteration is {self.config.iterations}")
         if self.begin_iteration >= self.config.iterations:
@@ -140,16 +145,17 @@ class PolicyAgent:
             states.append(old_state)
             losses.append(c.log_prob(action))
             rewards.append(reward)
+            dones.append(done)
 
-            def do_training(states: List, losses: List, rewards: List):
+            def do_training(states: List, losses: List, rewards: List, dones: List):
                 states = torch.Tensor(np.vstack(states))
                 losses = torch.stack(losses)
-                rewards = torch.Tensor(np.vstack(rewards))
-                self.trainer.train_step(states, losses, rewards, done)
+                rewards = torch.tensor(rewards, dtype=torch.float32)
+                self.trainer.train_step(states, losses, rewards, dones)
 
             if len(states) > self.config.batch_size and iteration % self.config.train_every_iteration == 0:
-                do_training(states, losses, rewards)
-                states, losses, rewards = [],[],[]
+                do_training(states, losses, rewards, dones)
+                states, losses, rewards, dones = [],[],[],[]
 
             self.epsilon = max(self.config.epsilon_min, self.epsilon * self.config.epsilon_decay)
             if done:

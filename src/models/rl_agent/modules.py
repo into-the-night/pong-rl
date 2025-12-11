@@ -30,15 +30,13 @@ class PolicyTrainer:
         self.model = model
         self.optimizer = torch.optim.RMSprop(model.parameters(), lr=lr, alpha=alpha)
 
-    def get_rewards(self, rewards):
+    def get_rewards(self, rewards, dones):
         discounted_r = np.zeros_like(rewards, dtype=np.float64)
         running_add = 0
         for t in reversed(range(0, rewards.size(dim=0))):
-            if rewards[t] != 0: running_add = 0 # reset the sum, since this was a game boundary (pong specific!)
+            if dones[t]: running_add = 0
             running_add = running_add * self.gamma + rewards[t]
             discounted_r[t] = running_add
-        discounted_r -= np.mean(discounted_r)
-        discounted_r /= np.std(discounted_r) + 1e-8
         return discounted_r
 
     def train_step(
@@ -46,16 +44,27 @@ class PolicyTrainer:
         state: torch.Tensor,
         losses: Union[torch.Tensor, List[int]],
         rewards: Union[torch.Tensor, float],
-        done: Union[torch.Tensor, bool]
+        dones: Union[List[bool], torch.Tensor]
     ):
         self.optimizer.zero_grad()
-        discounted_rewards = self.get_rewards(rewards)
+        discounted_rewards = self.get_rewards(rewards, dones)
         if not isinstance(discounted_rewards, torch.Tensor):
             discounted_rewards = torch.tensor(discounted_rewards, dtype=losses.dtype)
+        
+        # Normalize rewards
+        if len(discounted_rewards) > 1 and discounted_rewards.std() > 1e-8:
+            discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (discounted_rewards.std() + 1e-8)
+        else:
+            # If variance is 0 (e.g. all games identical), don't normalize to 0. 
+            # Just center them or leave raw. Leaving raw is safer for now to maintain sign.
+            print("Warning: Reward std dev is 0. Skipping normalization.")
+        
+        print(f"Mean log_prob: {losses.mean().item():.4f}")
+        print(f"Rewards stats: Mean={discounted_rewards.mean().item():.4f}, Std={discounted_rewards.std().item():.4f}")
+
         # Scale losses by discounted rewards
         losses = torch.mul(losses, discounted_rewards).mul(-1)
-        # Normalize losses
-        losses = (losses - losses.mean()) / (losses.std() + 1e-8)
+        
         loss = torch.sum(losses)
         print(f"This is loss: {loss}")
         print(f"This is reward: {rewards.sum()}")
