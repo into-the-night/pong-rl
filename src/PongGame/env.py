@@ -37,10 +37,10 @@ class GameEnvironment():
         return ActionResult(self.get_state(), reward, terminated, self.game.score)
     
     def get_state(self) -> torch.Tensor:
-        state = self.game.get_snapshot()  # (140, 100) grayscale
-        state = state[::2, ::2]  # Downsample to (70, 50)
-        # Normalize pixel values (0-255) to 0-1 range
-        return torch.Tensor(state / 255.0).ravel()
+        # Use structured state instead of pixels for faster learning
+        # This gives the agent velocity information (ball direction)
+        state_vector = self.game.get_state_vector()
+        return torch.Tensor(state_vector)
 
     def _take_action(self, action: np.ndarray) -> Tuple[int, bool]:
         prev_score = self.game.score

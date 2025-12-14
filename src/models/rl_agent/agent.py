@@ -47,6 +47,7 @@ class PolicyAgentConfig:
     epsilon_decay: float = 0.995
     alpha: float = 0.9
     gamma: float = 0.95
+    entropy_coef: float = 0.01
     train_every_iteration: int = 10
     save_every_iteration: Optional[int] = None
 
@@ -62,7 +63,7 @@ class PolicyAgent:
         self.config = config
         self.model_path = model_path
         self.model = PolicyNetwork(len(env.get_state()), self.config.hidden_state, env.actions_length())
-        self.trainer = PolicyTrainer(self.model, lr=config.lr, alpha=config.alpha, gamma=config.gamma)
+        self.trainer = PolicyTrainer(self.model, lr=config.lr, alpha=config.alpha, gamma=config.gamma, entropy_coef=config.entropy_coef)
         self.env = env
         self.steps = 0
         self.dataset_path = dataset_path
@@ -89,10 +90,12 @@ class PolicyAgent:
     def _get_action(self, state: np.ndarray) -> Tuple[np.ndarray, int]:
         prob = self.model(state)
         c = Categorical(prob)
-        # if np.random.uniform() < self.epsilon:
-        #     action = torch.tensor(random.randint(0, 1))
-        # else:
-        action = c.sample()
+        
+        # Epsilon-greedy exploration
+        if np.random.uniform() < self.epsilon:
+            action = torch.tensor(random.randint(0, 1))
+        else:
+            action = c.sample()
         return action, c, prob
     
     def _save_snapshot(self, step: int):
@@ -132,7 +135,7 @@ class PolicyAgent:
         plot_mean_scores = []
         top_result = 0
         total_score = 0
-        states, losses, rewards, dones = [],[],[],[]
+        states, losses, rewards, dones, probs = [],[],[],[],[]
         print(f"Begin iteration is {self.begin_iteration}")
         print(f"All iteration is {self.config.iterations}")
         if self.begin_iteration >= self.config.iterations:
@@ -146,16 +149,18 @@ class PolicyAgent:
             losses.append(c.log_prob(action))
             rewards.append(reward)
             dones.append(done)
+            probs.append(prob)
 
-            def do_training(states: List, losses: List, rewards: List, dones: List):
+            def do_training(states: List, losses: List, rewards: List, dones: List, probs: List):
                 states = torch.Tensor(np.vstack(states))
                 losses = torch.stack(losses)
                 rewards = torch.tensor(rewards, dtype=torch.float32)
-                self.trainer.train_step(states, losses, rewards, dones)
+                action_probs = torch.stack(probs)
+                self.trainer.train_step(states, losses, rewards, dones, action_probs)
 
             if len(states) > self.config.batch_size and iteration % self.config.train_every_iteration == 0:
-                do_training(states, losses, rewards, dones)
-                states, losses, rewards, dones = [],[],[],[]
+                do_training(states, losses, rewards, dones, probs)
+                states, losses, rewards, dones, probs = [],[],[],[],[]
 
             self.epsilon = max(self.config.epsilon_min, self.epsilon * self.config.epsilon_decay)
             if done:
@@ -176,7 +181,7 @@ class PolicyAgent:
                     top_result = score
                     self.save_agent(iteration)
 
-                print('Game', self.count_games, 'Score', score, 'Record:', top_result, "Iteration:", iteration)
+                print(f'Game {self.count_games} | Score: {score} | Record: {top_result} | Iteration: {iteration} | Epsilon: {self.epsilon:.3f}')
                 if show_plot:
                     plot_scores.append(score)
                     total_score += score

@@ -18,7 +18,7 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 # Paddle dimensions
-PADDLE_WIDTH, PADDLE_HEIGHT = 4, 14
+PADDLE_WIDTH, PADDLE_HEIGHT = 3, 14
 
 # Ball dimensions
 BALL_SIZE = 5
@@ -51,18 +51,19 @@ class Paddle:
 
     def ai_move(self, ball):
         # Add randomness and delay to make AI less perfect
-        if np.random.random() < 0.1:  # 10% chance to make a mistake
+        # Making AI weaker for initial learning
+        if np.random.random() < 0.4:  # 40% chance to make a mistake (was 10%)
             return  # Skip movement occasionally
         
         # Add some prediction error
         target_y = ball.rect.centery
         
-        # Slower reaction speed
+        # Slower reaction speed - make it beatable
         if self.rect.centery < target_y:
-            self.rect.y += self.speed * 0.7  # Reduced speed
+            self.rect.y += self.speed * 0.5  # Reduced speed
             self.direction = Direction.UP
         if self.rect.centery > target_y:
-            self.rect.y -= self.speed * 0.7  # Reduced speed
+            self.rect.y -= self.speed * 0.5  # Reduced speed
             self.direction = Direction.DOWN
 
     def draw(self, screen):
@@ -75,9 +76,10 @@ class Ball:
         self.speed_x, self.speed_y = self._init_speed()
 
     def _init_speed(self):
-        # speed = 1 if random.randint(0,1) < 0.5 else -1
-        speed = 1
-        return speed, speed
+        # Randomize both X and Y directions to avoid training bias
+        x_speed = 1 if random.randint(0, 1) == 0 else -1
+        y_speed = 1 if random.randint(0, 1) == 0 else -1
+        return x_speed, y_speed
 
     def move(self):
         self.rect.x += self.speed_x
@@ -130,6 +132,18 @@ class PongGame:
         grayscale = np.dot(rgb_array[..., :3], [0.299, 0.587, 0.114])
         return grayscale.astype(np.uint8)  # Returns (140, 100) shape
 
+    def get_state_vector(self) -> np.ndarray:
+        """Get structured state with positions and velocities (more informative than pixels)"""
+        # Normalize all values to [0, 1] range
+        return np.array([
+            self.ball.rect.x / WIDTH,           # Ball X position
+            self.ball.rect.y / HEIGHT,          # Ball Y position
+            self.ball.speed_x / 5.0,            # Ball X velocity (normalized, can be negative)
+            self.ball.speed_y / 5.0,            # Ball Y velocity (normalized, can be negative)
+            self.player.rect.y / HEIGHT,        # Player paddle Y position
+            self.opponent.rect.y / HEIGHT,      # Opponent paddle Y position
+        ], dtype=np.float32)
+
     def get_step_from_event(self, event: pygame.event.Event) -> Direction:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_UP:
@@ -169,12 +183,28 @@ class PongGame:
         self.ball.move()
         
         reward = 0
-        if self.ball.rect.centery in range(self.player.rect.centery - PADDLE_HEIGHT//2, self.player.rect.centery + PADDLE_HEIGHT//2):
-            reward += 0.01
-
+        
+        # Dense reward shaping for better learning
+        ball_y = self.ball.rect.centery
+        paddle_center = self.player.rect.centery
+        distance_to_ball = abs(ball_y - paddle_center)
+        
+        # Only give alignment reward when ball is approaching player
+        # This prevents exploitation by just staying in one position
+        if self.ball.speed_x > 0:  # Ball moving toward player
+            max_distance = HEIGHT / 2
+            alignment_reward = 0.05 * (1 - min(distance_to_ball / max_distance, 1.0))
+            reward += alignment_reward
+        
+        # Strong reward for hitting the ball
         if self.ball.check_collision(self.player):
-            # reward += 0.25
-            pass
+            reward += 2.0  # Significant reward for successful hit
+            
+        # Penalty if ball passes paddle (missed hit)
+        if self.ball.rect.right >= self.player.rect.left and self.ball.speed_x > 0:
+            # Ball is at paddle x-position but moving toward player
+            if distance_to_ball > PADDLE_HEIGHT:
+                reward -= 0.5  # Penalty for being out of position
 
         if self.ball.check_collision(self.opponent):
             self.ball.speed_x += np.random.random()
@@ -183,11 +213,11 @@ class PongGame:
         game_over = False
         if self.ball.rect.left <= 0:
             self.score += 1
-            reward += 1
+            reward += 5.0  # Larger reward for scoring
             self.ball_reset()
         if self.ball.rect.left >= WIDTH:
             self.score -= 1
-            reward -= 1
+            reward -= 5.0  # Larger penalty for getting scored on
             self.ball_reset()
 
         if abs(self.score) >= 4:
