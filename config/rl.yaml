@@ -1,15 +1,26 @@
 policy_agent:
   max_memory: 100000
   batch_size: 256  # Smaller batch for more frequent updates
-  lr: 1.0e-3  # Higher LR for simpler state space (was 5e-4)
-  hidden_state: 128  # Smaller network for 6-dim input (was 256)
-  epsilon_start: 0.95  # Very high initial exploration to break mode collapse
-  epsilon_min: 0.10  # Higher minimum to maintain exploration
-  epsilon_decay: 0.999  # Even slower decay
-  gamma: 0.99  # Higher discount for long-term planning
-  alpha: 0.9  # RMSprop alpha
-  entropy_coef: 0.02  # Entropy bonus for exploration
-  train_every_iteration: 5  # Train more frequently
+  lr: 1.0e-3  # Higher LR to escape local optimum
+  hidden_state: 128  # Network size
+  
+  # PPO-specific hyperparameters
+  gamma: 0.99  # Discount factor
+  gae_lambda: 0.95  # GAE lambda for advantage estimation
+  clip_epsilon: 0.2  # PPO clipping parameter
+  value_loss_coef: 0.5  # Coefficient for value function loss
+  entropy_coef: 0.2  # Much higher entropy to force exploration and escape uniform policy
+  max_grad_norm: 0.5  # Gradient clipping
+  ppo_epochs: 4  # Number of optimization epochs per batch
+  
+  # Training schedule
+  train_every_iteration: 1  # Train every step when buffer is full
+  
+  # Legacy epsilon params (not used in PPO, but kept for config compatibility)
+  epsilon_start: 0.0
+  epsilon_min: 0.0  
+  epsilon_decay: 1.0
+  
   value_for_end_game:
     __type__: models.rl_agent.agent.ValueForEndGame
     value: "last_action"

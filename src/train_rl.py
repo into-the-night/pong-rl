@@ -13,6 +13,7 @@ from PongGame.env import GameEnvironment
 @click.option('--clear-dataset', help='Clear dataset folder', is_flag=True, required=False, default=False)
 @click.option('--show-plot', help='Show plot', is_flag=True, required=False, default=False)
 @click.option('--last-checkpoint', help='Path of checkpoint to resume the training', type=str, required=False)
+@click.option('--max-games', help='Maximum number of games to train for', type=int, required=False, default=None)
 def main(**kwargs):
     options = EasyDict(kwargs)
     with open(options.config, 'r') as f:
@@ -20,7 +21,7 @@ def main(**kwargs):
     env: GameEnvironment = instantiate_from_config(config.env)
     policy_agent_config = PolicyAgentConfig(**instantiate_from_config(config.policy_agent))
     policy_agent = PolicyAgent(env, policy_agent_config, options.model, options.dataset, options.get("last_checkpoint", None))
-    policy_agent.train(options.show_plot, options.record, options.clear_dataset)
+    policy_agent.train(options.show_plot, options.record, options.clear_dataset, options.get("max_games", None))
 
 if __name__ == "__main__":
     main()
