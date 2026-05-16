@@ -264,28 +264,51 @@ class PolicyAgent:
 
 
 def replay_episode(states: List[np.ndarray], total_reward: float, game_idx: int,
-                   save_path: Optional[str] = "best_episode.gif"):
-    """Animate the best episode and optionally save as a gif."""
-    import matplotlib.animation as animation
+                   save_path: Optional[str] = "best_episode.gif",
+                   max_frames: int = 1200, fps: int = 60, scale: int = 3):
+    """Save the best episode as a gif, streaming frames to disk to avoid OOM.
+
+    Frames are rendered at the native 140x100 then upscaled by `scale` for visibility.
+    If the episode exceeds `max_frames`, frames are strided uniformly.
+    """
     from PongGame.game import render_from_state
 
-    print(f"\nReplaying best episode (game {game_idx}, reward={total_reward:.2f}, "
-          f"{len(states)} frames)...")
-    fig, ax = plt.subplots(figsize=(7, 5))
-    im = ax.imshow(render_from_state(states[0]))
-    ax.set_title(f"Best episode — game {game_idx} — reward {total_reward:.2f}")
-    ax.axis('off')
+    n = len(states)
+    stride = max(1, (n + max_frames - 1) // max_frames)
+    indices = range(0, n, stride)
+    print(f"\nBest episode: game {game_idx}, reward={total_reward:.2f}, "
+          f"{n} frames -> writing {len(list(indices))} (stride={stride}) to {save_path}")
 
-    def update(i):
-        im.set_data(render_from_state(states[i]))
-        return [im]
+    if not save_path:
+        return
 
-    anim = animation.FuncAnimation(fig, update, frames=len(states),
-                                   interval=16, blit=True, repeat=False)
-    if save_path:
-        try:
-            anim.save(save_path, writer=animation.PillowWriter(fps=60))
-            print(f"Saved replay to {save_path}")
-        except Exception as e:
-            print(f"Could not save gif ({e}); showing interactively instead.")
-    plt.show()
+    try:
+        from PIL import Image
+    except ImportError:
+        print("Pillow not available; skipping gif save.")
+        return
+
+    def make_pil(i):
+        frame = render_from_state(states[i])  # (H, W, 3) uint8
+        img = Image.fromarray(frame, mode="RGB")
+        if scale != 1:
+            img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
+        # Quantize to palette to keep the gif small and memory-cheap.
+        return img.convert("P", palette=Image.ADAPTIVE, colors=64)
+
+    # Try imageio first — it streams frames to disk without holding them all in RAM.
+    try:
+        import imageio.v2 as imageio
+        with imageio.get_writer(save_path, mode="I", duration=1.0 / fps, loop=0) as writer:
+            for i in range(0, n, stride):
+                writer.append_data(np.asarray(make_pil(i).convert("RGB")))
+        print(f"Saved replay to {save_path} (imageio)")
+        return
+    except ImportError:
+        pass
+
+    # Fallback: Pillow. Keep palette frames (tiny) instead of RGBA canvases.
+    frames = [make_pil(i) for i in range(0, n, stride)]
+    frames[0].save(save_path, save_all=True, append_images=frames[1:],
+                   duration=int(1000 / fps), loop=0, optimize=False, disposal=2)
+    print(f"Saved replay to {save_path} (Pillow)")

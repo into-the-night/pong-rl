@@ -76,8 +76,17 @@ class Ball:
             self.speed_y *= -1
 
     def check_collision(self, paddle: Paddle) -> bool:
-        if self.rect.colliderect(paddle.rect):
-            self.speed_x *= -1
+        if not self.rect.colliderect(paddle.rect):
+            return False
+        ball_cx = self.rect.x + self.rect.w / 2
+        paddle_cx = paddle.rect.x + paddle.rect.w / 2
+        if ball_cx < paddle_cx and self.speed_x > 0:
+            self.rect.x = paddle.rect.left - self.rect.w
+            self.speed_x = -abs(self.speed_x)
+            return True
+        if ball_cx > paddle_cx and self.speed_x < 0:
+            self.rect.x = paddle.rect.right
+            self.speed_x = abs(self.speed_x)
             return True
         return False
 
