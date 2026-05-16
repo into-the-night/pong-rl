@@ -24,6 +24,6 @@ policy_agent:
   value_for_end_game:
     __type__: models.rl_agent.agent.ValueForEndGame
     value: "last_action"
-  iterations: 80000
+  iterations: 360000
   min_deaths_to_record: 60
 

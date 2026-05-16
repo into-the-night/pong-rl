@@ -135,6 +135,7 @@ class PolicyAgent:
         max_games: Optional[int] = None,
         replay_best: bool = True,
         base_seed: int = 0,
+        win_streak: Optional[int] = None,
     ):
         os.makedirs(os.path.dirname(self.model_path) or ".", exist_ok=True)
 
@@ -143,14 +144,18 @@ class PolicyAgent:
 
         ep_rewards = np.zeros(num_envs, dtype=np.float64)
         ep_lengths = np.zeros(num_envs, dtype=np.int64)
+        ep_score_diff = np.zeros(num_envs, dtype=np.int64)  # player_goals - opp_goals
         ep_states: List[List[np.ndarray]] = [[] for _ in range(num_envs)]
         best_reward = -float("inf")
         best_states: List[np.ndarray] = []
         best_game_idx = -1
+        consecutive_wins = 0
 
         print(f"Vectorized PPO: num_envs={num_envs}, rollout_steps={rollout_steps}")
         if max_games:
             print(f"Stopping after {max_games} games")
+        if win_streak:
+            print(f"Stopping after {win_streak} consecutive wins (player score reaches +4)")
 
         iteration = self.begin_iteration
         total_iterations = self.config.iterations
@@ -182,20 +187,33 @@ class PolicyAgent:
                     ep_rewards[i] += rewards[i]
                     ep_lengths[i] += 1
                     ep_states[i].append(obs[i].copy())
+                    # Goal rewards are +/-5; shaping is bounded to ~[-0.5, +2.05].
+                    if rewards[i] > 4.0:
+                        ep_score_diff[i] += 1
+                    elif rewards[i] < -4.0:
+                        ep_score_diff[i] -= 1
                     if dones[i]:
                         self.count_games += 1
+                        won = ep_score_diff[i] > 0
+                        consecutive_wins = consecutive_wins + 1 if won else 0
                         if ep_rewards[i] > best_reward:
                             best_reward = float(ep_rewards[i])
                             best_states = ep_states[i].copy()
                             best_game_idx = self.count_games
                             self.save_agent(iteration)
-                        print(f"Game {self.count_games} | reward={ep_rewards[i]:7.2f} | "
-                              f"len={ep_lengths[i]:4d} | best={best_reward:7.2f} "
+                        outcome = "WIN " if won else "loss"
+                        print(f"Game {self.count_games} | {outcome} | "
+                              f"reward={ep_rewards[i]:7.2f} | len={ep_lengths[i]:4d} | "
+                              f"streak={consecutive_wins} | best={best_reward:7.2f} "
                               f"(game {best_game_idx}) | env={i}")
                         ep_rewards[i] = 0.0
                         ep_lengths[i] = 0
+                        ep_score_diff[i] = 0
                         ep_states[i] = []
                         if max_games and self.count_games >= max_games:
+                            stop = True
+                        if win_streak and consecutive_wins >= win_streak:
+                            print(f"Reached {consecutive_wins} consecutive wins — stopping.")
                             stop = True
 
                 obs = next_obs

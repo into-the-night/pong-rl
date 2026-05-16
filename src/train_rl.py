@@ -17,6 +17,8 @@ from PongGame.env import PongEnv
 @click.option('--rollout-steps', type=int, default=256, show_default=True,
               help='Steps per env per PPO update')
 @click.option('--max-games', type=int, default=None, help='Stop after N completed games')
+@click.option('--win-streak', type=int, default=None,
+              help='Stop once the agent wins N games in a row (player reaches 4-x first)')
 @click.option('--show-plot', is_flag=True, help='Save training loss plot at end')
 @click.option('--no-replay', is_flag=True, help='Skip best-episode replay at end')
 @click.option('--seed', type=int, default=0, show_default=True)
@@ -41,6 +43,7 @@ def main(**kwargs):
         max_games=options.max_games,
         replay_best=not options.no_replay,
         base_seed=options.seed,
+        win_streak=options.win_streak,
     )
 
 
