@@ -27,7 +27,3 @@ policy_agent:
   iterations: 80000
   min_deaths_to_record: 60
 
-env: 
-  __type__: PongGame.env.GameEnvironment
-  game:
-    __type__: PongGame.game.PongGame

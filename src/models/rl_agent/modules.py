@@ -113,7 +113,7 @@ class PPOTrainer:
                 nextnonterminal = 1.0 - dones[t]
                 nextvalues = next_value
             else:
-                nextnonterminal = 1.0 - dones[t]
+                nextnonterminal = 1.0 - dones[t + 1]
                 nextvalues = values[t + 1]
             
             delta = rewards[t] + self.gamma * nextvalues * nextnonterminal - values[t]
@@ -240,6 +240,62 @@ class PPOTrainer:
                 print(f"Rewards: Mean={rewards.mean().item():.4f}, Sum={rewards.sum().item():.4f}")
                 print("-" * 60)
         
+        return loss_info
+
+    def update(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        old_log_probs: torch.Tensor,
+        advantages: torch.Tensor,
+        returns: torch.Tensor,
+        old_values: torch.Tensor,
+    ):
+        """PPO update with precomputed advantages and returns (for vectorized rollouts)."""
+        raw_adv_mean = advantages.mean().item()
+        raw_adv_std = advantages.std().item()
+        if advantages.std() > 1e-4:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        loss_info = {}
+        for epoch in range(self.ppo_epochs):
+            action_probs = self.actor(states)
+            dist = torch.distributions.Categorical(action_probs)
+            new_log_probs = dist.log_prob(actions)
+            entropy = dist.entropy().mean()
+            new_values = self.critic(states)
+
+            ratio = torch.exp(new_log_probs - old_log_probs)
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages
+            policy_loss = -torch.min(surr1, surr2).mean()
+
+            value_pred_clipped = old_values + torch.clamp(
+                new_values - old_values, -self.clip_epsilon, self.clip_epsilon
+            )
+            v_loss_unclipped = (new_values - returns) ** 2
+            v_loss_clipped = (value_pred_clipped - returns) ** 2
+            value_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
+
+            loss = policy_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
+
+            if epoch == 0:
+                loss_info = {
+                    'policy_loss': policy_loss.item(),
+                    'value_loss': value_loss.item(),
+                    'entropy': entropy.item(),
+                    'total_loss': loss.item(),
+                    'raw_adv_mean': raw_adv_mean,
+                    'raw_adv_std': raw_adv_std,
+                }
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(
+                list(self.actor.parameters()) + list(self.critic.parameters()),
+                self.max_grad_norm
+            )
+            self.optimizer.step()
         return loss_info
 
 

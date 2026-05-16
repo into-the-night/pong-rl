@@ -1,53 +1,39 @@
-from typing import Tuple, Union, List
-from dataclasses import dataclass
+"""Gymnasium env wrapping the pure-numpy Pong, plus a vector-env helper."""
+from typing import Optional
 import numpy as np
-import torch
-from PongGame.game import PongGame, Direction
+import gymnasium as gym
+from gymnasium import spaces
 
-@dataclass
-class ActionResult:
-    new_state: np.ndarray
-    reward: float
-    terminated: bool
-    score: float
+from PongGame.game import PongGame
 
-class GameEnvironment():
-    def __init__(self, game: PongGame):
+
+class PongEnv(gym.Env):
+    metadata = {"render_modes": ["rgb_array"]}
+
+    def __init__(self, seed: Optional[int] = None):
         super().__init__()
-        self.steps_taken = 0
-        self.game = game
-        game.reset()
+        self.game = PongGame(seed=seed)
+        self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(6,), dtype=np.float32)
+        self.action_space = spaces.Discrete(2)
 
-    def actions_length(self) -> int:
-        return 2
-
-    def reset(self):
+    def reset(self, *, seed: Optional[int] = None, options=None):
+        super().reset(seed=seed)
+        if seed is not None:
+            self.game.rng = np.random.default_rng(seed)
         self.game.reset()
-        self.steps_taken = 0
+        return self.game.get_state_vector(), {}
 
-    def get_snapshot(self) -> np.ndarray:
-        # Returns (140, 100) grayscale array
-        return self.game.get_snapshot()
+    def step(self, action):
+        obs, reward, terminated = self.game.step(int(action))
+        return obs, float(reward), bool(terminated), False, {"score": self.game.score}
 
-    def do_action(self, action: np.ndarray) -> ActionResult:
-        self.steps_taken += 1
-        
-        # Execute action in game
-        reward, terminated = self._take_action(action)
-        return ActionResult(self.get_state(), reward, terminated, self.game.score)
-    
-    def get_state(self) -> torch.Tensor:
-        # Use structured state instead of pixels for faster learning
-        # This gives the agent velocity information (ball direction)
-        state_vector = self.game.get_state_vector()
-        return torch.Tensor(state_vector)
+    def render(self):
+        return self.game.render()
 
-    def _take_action(self, action: np.ndarray) -> Tuple[int, bool]:
-        prev_score = self.game.score
-        game_over, reward = self.game.play_step(action)
-        return reward, game_over
 
-if __name__ == '__main__':
-    game = PongGame()
-    env = GameEnvironment(game)
-    state = env.get_state()
+def make_vector_env(num_envs: int, base_seed: int = 0) -> gym.vector.SyncVectorEnv:
+    def factory(rank):
+        def _thunk():
+            return PongEnv(seed=base_seed + rank)
+        return _thunk
+    return gym.vector.SyncVectorEnv([factory(i) for i in range(num_envs)])

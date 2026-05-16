@@ -1,90 +1,43 @@
-from typing import Union, Tuple, List, Optional
-import random
-import os
+from typing import Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-import shutil
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-import torch.optim as optim
 from torch.distributions import Categorical
 
 from models.rl_agent.modules import PolicyNetwork, ValueNetwork, PPOTrainer
-from PongGame.env import ActionResult, GameEnvironment
+from PongGame.env import PongEnv, make_vector_env
 
-
-def plot(scores, mean_scores):
-    plt.clf()
-    plt.title('Training...')
-    plt.xlabel('Number of Games')
-    plt.ylabel('Score')
-    plt.plot(scores)
-    plt.plot(mean_scores)
-    plt.ylim(ymin=0)
-    plt.text(len(scores)-1, scores[-1], str(scores[-1]))
-    plt.text(len(mean_scores)-1, mean_scores[-1], str(mean_scores[-1]))
-    plt.show(block=False)
-    plt.pause(.1)
 
 def plot_losses(policy_losses, value_losses, entropies, total_losses, mean_rewards):
-    """Plot all loss metrics and rewards after training"""
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    
-    # Policy Loss
-    axes[0, 0].plot(policy_losses, 'b-', linewidth=1.5)
-    axes[0, 0].set_title('Policy Loss', fontsize=12, fontweight='bold')
-    axes[0, 0].set_xlabel('Training Step')
-    axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].grid(True, alpha=0.3)
-    
-    # Value Loss
-    axes[0, 1].plot(value_losses, 'r-', linewidth=1.5)
-    axes[0, 1].set_title('Value Loss', fontsize=12, fontweight='bold')
-    axes[0, 1].set_xlabel('Training Step')
-    axes[0, 1].set_ylabel('Loss')
-    axes[0, 1].grid(True, alpha=0.3)
-    
-    # Entropy
-    axes[0, 2].plot(entropies, 'g-', linewidth=1.5)
-    axes[0, 2].set_title('Entropy', fontsize=12, fontweight='bold')
-    axes[0, 2].set_xlabel('Training Step')
-    axes[0, 2].set_ylabel('Entropy')
-    axes[0, 2].grid(True, alpha=0.3)
-    
-    # Total Loss
-    axes[1, 0].plot(total_losses, 'm-', linewidth=1.5)
-    axes[1, 0].set_title('Total Loss', fontsize=12, fontweight='bold')
-    axes[1, 0].set_xlabel('Training Step')
-    axes[1, 0].set_ylabel('Loss')
-    axes[1, 0].grid(True, alpha=0.3)
-    
-    # Mean Rewards per Training Step
-    axes[1, 1].plot(mean_rewards, 'orange', linewidth=1.5)
-    axes[1, 1].set_title('Mean Reward per Training Step', fontsize=12, fontweight='bold')
-    axes[1, 1].set_xlabel('Training Step')
-    axes[1, 1].set_ylabel('Mean Reward')
-    axes[1, 1].grid(True, alpha=0.3)
-    axes[1, 1].axhline(y=0, color='k', linestyle='--', alpha=0.3)
-    
-    # Cumulative Reward
-    cumulative_rewards = np.cumsum(mean_rewards)
-    axes[1, 2].plot(cumulative_rewards, 'cyan', linewidth=1.5)
-    axes[1, 2].set_title('Cumulative Reward', fontsize=12, fontweight='bold')
-    axes[1, 2].set_xlabel('Training Step')
-    axes[1, 2].set_ylabel('Cumulative Reward')
-    axes[1, 2].grid(True, alpha=0.3)
-    
+    metrics = [
+        (policy_losses, 'Policy Loss', 'b-'),
+        (value_losses, 'Value Loss', 'r-'),
+        (entropies, 'Entropy', 'g-'),
+        (total_losses, 'Total Loss', 'm-'),
+        (mean_rewards, 'Mean Reward', 'orange'),
+        (np.cumsum(mean_rewards), 'Cumulative Reward', 'cyan'),
+    ]
+    for ax, (data, title, style) in zip(axes.flat, metrics):
+        ax.plot(data, style if isinstance(style, str) and len(style) <= 3 else 'b-', linewidth=1.5,
+                color=style if not (isinstance(style, str) and len(style) <= 3) else None)
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.set_xlabel('Update')
+        ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig('training_losses.png', dpi=300, bbox_inches='tight')
-    print(f"\nLoss and reward plots saved to 'training_losses.png'")
-    plt.show()
+    plt.savefig('training_losses.png', dpi=200, bbox_inches='tight')
+    print("Saved training_losses.png")
+    plt.close(fig)
+
 
 class ValueForEndGame(Enum):
     last_action = "last_action"
     not_exist = "not_exist"
+
 
 @dataclass
 class PolicyAgentConfig:
@@ -95,9 +48,9 @@ class PolicyAgentConfig:
     iterations: int
     min_deaths_to_record: int
     lr: float = 3e-4
-    epsilon_start: float = 0.6
-    epsilon_min: float = 0.01
-    epsilon_decay: float = 0.995
+    epsilon_start: float = 0.0
+    epsilon_min: float = 0.0
+    epsilon_decay: float = 1.0
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
@@ -105,299 +58,234 @@ class PolicyAgentConfig:
     entropy_coef: float = 0.01
     max_grad_norm: float = 0.5
     ppo_epochs: int = 4
-    train_every_iteration: int = 10
+    train_every_iteration: int = 1
     save_every_iteration: Optional[int] = None
 
-class RolloutBuffer:
-    """Buffer for storing trajectories for PPO training"""
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
-        self.log_probs = []
-        self.values = []
-    
-    def clear(self):
-        self.states.clear()
-        self.actions.clear()
-        self.rewards.clear()
-        self.dones.clear()
-        self.log_probs.clear()
-        self.values.clear()
-    
-    def add(self, state, action, reward, done, log_prob, value):
-        self.states.append(state)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.dones.append(done)
-        self.log_probs.append(log_prob)
-        self.values.append(value)
-    
-    def get(self):
-        """Convert buffer contents to tensors"""
-        return (
-            torch.FloatTensor(np.array(self.states)),
-            torch.LongTensor(self.actions),
-            torch.FloatTensor(self.log_probs),
-            torch.FloatTensor(self.rewards),
-            torch.FloatTensor(self.dones),
-            torch.FloatTensor(self.values)
-        )
-    
-    def __len__(self):
-        return len(self.states)
+
+def _compute_gae(rewards, values, dones, next_value, gamma, lam):
+    T = len(rewards)
+    adv = np.zeros(T, dtype=np.float32)
+    last = 0.0
+    for t in reversed(range(T)):
+        nonterminal = 1.0 - dones[t]
+        next_v = next_value if t == T - 1 else values[t + 1]
+        delta = rewards[t] + gamma * next_v * nonterminal - values[t]
+        last = delta + gamma * lam * nonterminal * last
+        adv[t] = last
+    returns = adv + values
+    return adv, returns
+
 
 class PolicyAgent:
     def __init__(
         self,
-        env: GameEnvironment,
+        env: Optional[PongEnv],
         config: PolicyAgentConfig,
         model_path: str,
-        dataset_path: str,
-        last_checkpoint: Optional[str]
+        dataset_path: str = "",
+        last_checkpoint: Optional[str] = None,
     ):
         self.config = config
         self.model_path = model_path
-        
-        # PPO uses separate actor and critic networks
-        self.actor = PolicyNetwork(len(env.get_state()), self.config.hidden_state, env.actions_length())
-        self.critic = ValueNetwork(len(env.get_state()), self.config.hidden_state)
-        
-        # PPO Trainer
+
+        sample = env if env is not None else PongEnv()
+        obs_dim = sample.observation_space.shape[0]
+        n_actions = int(sample.action_space.n)
+
+        self.actor = PolicyNetwork(obs_dim, config.hidden_state, n_actions)
+        self.critic = ValueNetwork(obs_dim, config.hidden_state)
         self.trainer = PPOTrainer(
-            actor=self.actor,
-            critic=self.critic,
-            lr=config.lr,
-            gamma=config.gamma,
-            gae_lambda=config.gae_lambda,
-            clip_epsilon=config.clip_epsilon,
-            value_loss_coef=config.value_loss_coef,
-            entropy_coef=config.entropy_coef,
-            max_grad_norm=config.max_grad_norm,
-            ppo_epochs=config.ppo_epochs
+            actor=self.actor, critic=self.critic,
+            lr=config.lr, gamma=config.gamma, gae_lambda=config.gae_lambda,
+            clip_epsilon=config.clip_epsilon, value_loss_coef=config.value_loss_coef,
+            entropy_coef=config.entropy_coef, max_grad_norm=config.max_grad_norm,
+            ppo_epochs=config.ppo_epochs,
         )
-        
-        self.env = env
-        self.steps = 0
-        self.dataset_path = dataset_path
+
+        self.obs_dim = obs_dim
+        self.n_actions = n_actions
         self.count_games = 0
-        self.recorded_actions = []
-        self.epsilon = config.epsilon_start
         self.begin_iteration = 0
-        self.rollout_buffer = RolloutBuffer()
-        
-        # Loss tracking
-        self.policy_losses = []
-        self.value_losses = []
-        self.entropies = []
-        self.total_losses = []
-        self.mean_rewards = []  # Track mean reward per training step
-        
+        self.policy_losses, self.value_losses = [], []
+        self.entropies, self.total_losses, self.mean_rewards = [], [], []
+
         if last_checkpoint:
-            parameters = torch.load(last_checkpoint)
-            self.actor.load_state_dict(parameters["actor"])
-            self.critic.load_state_dict(parameters["critic"])
-            self.trainer.optimizer.load_state_dict(parameters["optimizer"])
-            self.count_games = parameters.get("count_games", 0)
-            self.begin_iteration = parameters.get("begin_iteration", 0)
+            params = torch.load(last_checkpoint)
+            self.actor.load_state_dict(params["actor"])
+            self.critic.load_state_dict(params["critic"])
+            self.trainer.optimizer.load_state_dict(params["optimizer"])
+            self.count_games = params.get("count_games", 0)
+            self.begin_iteration = params.get("begin_iteration", 0)
 
-    @property
-    def snapshots_path(self):
-        return os.path.join(self.dataset_path, "snapshots")
-
-    @property
-    def actions_path(self):
-        return os.path.join(self.dataset_path, "actions")
-
-    def _get_action(self, state: np.ndarray) -> Tuple[int, float, float]:
-        """
-        Get action using current policy
-        
-        Returns:
-            action: Selected action
-            log_prob: Log probability of selected action
-            value: State value estimate
-        """
-        # Convert state to tensor
-        state_tensor = torch.FloatTensor(state)
-        
-        # Get action probabilities from actor
+    def _act_batch(self, obs_np: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        obs_t = torch.from_numpy(obs_np).float()
         with torch.no_grad():
-            action_probs = self.actor(state_tensor)
-            value = self.critic(state_tensor)
-        
-        # Create categorical distribution
-        dist = Categorical(action_probs)
-        
-        # Sample from policy (NO epsilon-greedy for PPO!)
-        # PPO uses entropy bonus for exploration instead
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-        
-        return action.item(), log_prob.item(), value.item()
-    
-    def _save_snapshot(self, step: int):
-        plt.imsave(os.path.join(self.snapshots_path, f'{step}.jpg'), self.env.get_snapshot())
-    
-    def _save_actions(self):
-        with open(self.actions_path, mode="w") as file:
-            file.write("\n".join([str(action) for action in self.recorded_actions]))
-    
-    def play_step(
+            probs = self.actor(obs_t)
+            values = self.critic(obs_t)
+        dist = Categorical(probs)
+        actions = dist.sample()
+        log_probs = dist.log_prob(actions)
+        return actions.numpy(), log_probs.numpy(), values.numpy()
+
+    def train(
         self,
-        record: bool = False,
-        step: Optional[int] = None
-    ) -> Tuple[np.ndarray, int, ActionResult, float, float]:
-        """Play one step and return state, action, result, log_prob, value"""
-        old_state = self.env.get_state()
-        action, log_prob, value = self._get_action(old_state)
-        
-        self.steps += 1
-        if step is None:
-            step = self.steps
-        result = self.env.do_action(action)
+        num_envs: int = 5,
+        rollout_steps: int = 256,
+        show_plot: bool = False,
+        max_games: Optional[int] = None,
+        replay_best: bool = True,
+        base_seed: int = 0,
+    ):
+        os.makedirs(os.path.dirname(self.model_path) or ".", exist_ok=True)
 
-        if record:
-            self._save_snapshot(step)
-            self.recorded_actions.append(action)
-            self._save_actions()
-        
-        return old_state, action, result, log_prob, value
+        venv = make_vector_env(num_envs, base_seed=base_seed)
+        obs, _ = venv.reset(seed=base_seed)
 
-    def train(self, show_plot: bool = False, record: bool = False, clear_old: bool = False, max_games: Optional[int] = None):
-        self._setup_training(clear_old)
-        
-        plot_scores = []
-        plot_mean_scores = []
-        top_result = 0
-        total_score = 0
-        
-        print(f"Begin iteration is {self.begin_iteration}")
-        print(f"All iteration is {self.config.iterations}")
+        ep_rewards = np.zeros(num_envs, dtype=np.float64)
+        ep_lengths = np.zeros(num_envs, dtype=np.int64)
+        ep_states: List[List[np.ndarray]] = [[] for _ in range(num_envs)]
+        best_reward = -float("inf")
+        best_states: List[np.ndarray] = []
+        best_game_idx = -1
+
+        print(f"Vectorized PPO: num_envs={num_envs}, rollout_steps={rollout_steps}")
         if max_games:
-            print(f"Training will stop after {max_games} games")
-        if self.begin_iteration >= self.config.iterations:
-            return
-        
-        for iteration in range(self.begin_iteration, self.config.iterations):
-            # Check if we've reached max games
-            if max_games and self.count_games >= max_games:
-                print(f"\nReached maximum of {max_games} games. Stopping training...")
-                break
-            old_state, action, result, log_prob, value = self.play_step(
-                record=record and self.count_games >= self.config.min_deaths_to_record
-            )
-            reward, new_state, done = result.reward, result.new_state, result.terminated
-            
-            # Add to rollout buffer
-            self.rollout_buffer.add(old_state, action, reward, done, log_prob, value)
+            print(f"Stopping after {max_games} games")
 
-            # Train when buffer is full
-            if len(self.rollout_buffer) >= self.config.batch_size and iteration % self.config.train_every_iteration == 0:
-                # Get next state value for GAE computation (bootstrap value)
-                if not done:
-                    next_state_tensor = torch.FloatTensor(new_state)
-                    with torch.no_grad():
-                        next_value = self.critic(next_state_tensor).item()
-                else:
-                    next_value = 0.0
-                
-                # Get all data from buffer
-                states, actions, log_probs, rewards, dones, values = self.rollout_buffer.get()
-                
-                # PPO training step
-                loss_info = self.trainer.train_step(
-                    states=states,
-                    actions=actions,
-                    old_log_probs=log_probs,
-                    rewards=rewards,
-                    dones=dones,
-                    values=values,
-                    next_value=next_value
+        iteration = self.begin_iteration
+        total_iterations = self.config.iterations
+        stop = False
+
+        while iteration < total_iterations and not stop:
+            T = rollout_steps
+            buf_states = np.zeros((T, num_envs, self.obs_dim), dtype=np.float32)
+            buf_actions = np.zeros((T, num_envs), dtype=np.int64)
+            buf_logp = np.zeros((T, num_envs), dtype=np.float32)
+            buf_values = np.zeros((T, num_envs), dtype=np.float32)
+            buf_rewards = np.zeros((T, num_envs), dtype=np.float32)
+            buf_dones = np.zeros((T, num_envs), dtype=np.float32)
+
+            for t in range(T):
+                actions, log_probs, values = self._act_batch(obs)
+                buf_states[t] = obs
+                buf_actions[t] = actions
+                buf_logp[t] = log_probs
+                buf_values[t] = values
+
+                next_obs, rewards, terms, truncs, _infos = venv.step(actions)
+                dones = np.logical_or(terms, truncs)
+
+                buf_rewards[t] = rewards
+                buf_dones[t] = dones.astype(np.float32)
+
+                for i in range(num_envs):
+                    ep_rewards[i] += rewards[i]
+                    ep_lengths[i] += 1
+                    ep_states[i].append(obs[i].copy())
+                    if dones[i]:
+                        self.count_games += 1
+                        if ep_rewards[i] > best_reward:
+                            best_reward = float(ep_rewards[i])
+                            best_states = ep_states[i].copy()
+                            best_game_idx = self.count_games
+                            self.save_agent(iteration)
+                        print(f"Game {self.count_games} | reward={ep_rewards[i]:7.2f} | "
+                              f"len={ep_lengths[i]:4d} | best={best_reward:7.2f} "
+                              f"(game {best_game_idx}) | env={i}")
+                        ep_rewards[i] = 0.0
+                        ep_lengths[i] = 0
+                        ep_states[i] = []
+                        if max_games and self.count_games >= max_games:
+                            stop = True
+
+                obs = next_obs
+                if stop:
+                    break
+
+            steps_collected = (t + 1) if stop else T
+            with torch.no_grad():
+                next_values = self.critic(torch.from_numpy(obs).float()).numpy()
+
+            advantages = np.zeros((steps_collected, num_envs), dtype=np.float32)
+            returns = np.zeros((steps_collected, num_envs), dtype=np.float32)
+            for e in range(num_envs):
+                adv, ret = _compute_gae(
+                    buf_rewards[:steps_collected, e],
+                    buf_values[:steps_collected, e],
+                    buf_dones[:steps_collected, e],
+                    float(next_values[e]),
+                    self.config.gamma, self.config.gae_lambda,
                 )
-                
-                # Track losses and rewards
-                if loss_info:
-                    self.policy_losses.append(loss_info['policy_loss'])
-                    self.value_losses.append(loss_info['value_loss'])
-                    self.entropies.append(loss_info['entropy'])
-                    self.total_losses.append(loss_info['total_loss'])
-                    # Track mean reward for this training batch
-                    self.mean_rewards.append(rewards.mean().item())
-                
-                # Clear buffer after training
-                self.rollout_buffer.clear()
-            
-            if done:
-                self.count_games += 1
-                score = result.score
-                self.env.reset()
+                advantages[:, e] = adv
+                returns[:, e] = ret
 
-                if record and self.count_games > self.config.min_deaths_to_record:
-                    if self.config.value_for_end_game.value == ValueForEndGame.last_action.value:
-                        self.steps += 1
-                        self.recorded_actions.append(self.env.actions_length())
-                        self._save_snapshot(self.steps)
-                    elif self.config.value_for_end_game.value == ValueForEndGame.not_exist.value:
-                        pass
-                self._save_actions()
+            flat = lambda arr: arr.reshape(-1, *arr.shape[2:])
+            loss_info = self.trainer.update(
+                states=torch.from_numpy(flat(buf_states[:steps_collected])).float(),
+                actions=torch.from_numpy(flat(buf_actions[:steps_collected])).long(),
+                old_log_probs=torch.from_numpy(flat(buf_logp[:steps_collected])).float(),
+                advantages=torch.from_numpy(flat(advantages)).float(),
+                returns=torch.from_numpy(flat(returns)).float(),
+                old_values=torch.from_numpy(flat(buf_values[:steps_collected])).float(),
+            )
+            if loss_info:
+                self.policy_losses.append(loss_info['policy_loss'])
+                self.value_losses.append(loss_info['value_loss'])
+                self.entropies.append(loss_info['entropy'])
+                self.total_losses.append(loss_info['total_loss'])
+                self.mean_rewards.append(float(buf_rewards[:steps_collected].mean()))
+                print(f"[update] iter={iteration} pol={loss_info['policy_loss']:.4f} "
+                      f"val={loss_info['value_loss']:.4f} ent={loss_info['entropy']:.4f}")
 
-                if score > top_result:
-                    top_result = score
-                    self.save_agent(iteration)
-
-                print(f'Game {self.count_games} | Score: {score} | Record: {top_result} | Iteration: {iteration} | Epsilon: {self.epsilon:.3f}')
-                if show_plot:
-                    plot_scores.append(score)
-                    total_score += score
-                    mean_score = total_score / self.count_games
-                    plot_mean_scores.append(mean_score)
-                    plot(plot_scores, plot_mean_scores)
-            
-            if self.config.save_every_iteration is not None and iteration % self.config.save_every_iteration == 0:
+            iteration += steps_collected
+            if (self.config.save_every_iteration is not None
+                    and iteration % self.config.save_every_iteration < steps_collected):
                 self.save_agent(iteration)
-        
-        self._save_actions()
-        self.save_agent(iteration+1)
-        print(f"finish iteration is {iteration}")
-        
-        # Plot losses if we have any
-        if self.policy_losses:
-            print(f"\nPlotting {len(self.policy_losses)} training steps...")
-            plot_losses(self.policy_losses, self.value_losses, self.entropies, self.total_losses, self.mean_rewards)
 
-    def _setup_training(self, clear_old: bool):
-        if clear_old:
-            self._clear_training_data()
-        else:
-            self._load_training_data()
-        os.makedirs(self.snapshots_path, exist_ok=True)
-        if os.path.dirname(self.model_path) != "":
-            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+        venv.close()
+        self.save_agent(iteration)
+        print(f"\nFinished. Total games: {self.count_games}. Best reward: {best_reward:.2f}")
 
-    def _clear_training_data(self):
-        self.steps = 0
-        self.recorded_actions = []
-        shutil.rmtree(self.dataset_path)
+        if self.policy_losses and show_plot:
+            plot_losses(self.policy_losses, self.value_losses, self.entropies,
+                        self.total_losses, self.mean_rewards)
 
-    def _load_training_data(self):
-        try:
-            self.steps = len([f for f in os.listdir(self.snapshots_path) if f.endswith('.jpg')])
-            with open(self.actions_path) as f:
-                self.recorded_actions = [int(line) for line in f]
-        except:
-            self.steps = 0
-            self.recorded_actions = []
-        print(self.steps, len(self.recorded_actions))
-        assert self.steps == len(self.recorded_actions)
+        if replay_best and best_states:
+            replay_episode(best_states, best_reward, best_game_idx)
 
     def save_agent(self, iteration: int):
-        """Save both actor and critic networks"""
         torch.save({
             "actor": self.actor.state_dict(),
             "critic": self.critic.state_dict(),
             "optimizer": self.trainer.optimizer.state_dict(),
             "count_games": self.count_games,
-            "begin_iteration": iteration
+            "begin_iteration": iteration,
         }, self.model_path)
+
+
+def replay_episode(states: List[np.ndarray], total_reward: float, game_idx: int,
+                   save_path: Optional[str] = "best_episode.gif"):
+    """Animate the best episode and optionally save as a gif."""
+    import matplotlib.animation as animation
+    from PongGame.game import render_from_state
+
+    print(f"\nReplaying best episode (game {game_idx}, reward={total_reward:.2f}, "
+          f"{len(states)} frames)...")
+    fig, ax = plt.subplots(figsize=(7, 5))
+    im = ax.imshow(render_from_state(states[0]))
+    ax.set_title(f"Best episode — game {game_idx} — reward {total_reward:.2f}")
+    ax.axis('off')
+
+    def update(i):
+        im.set_data(render_from_state(states[i]))
+        return [im]
+
+    anim = animation.FuncAnimation(fig, update, frames=len(states),
+                                   interval=16, blit=True, repeat=False)
+    if save_path:
+        try:
+            anim.save(save_path, writer=animation.PillowWriter(fps=60))
+            print(f"Saved replay to {save_path}")
+        except Exception as e:
+            print(f"Could not save gif ({e}); showing interactively instead.")
+    plt.show()

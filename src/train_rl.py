@@ -3,25 +3,46 @@ import yaml
 
 from utils import EasyDict, instantiate_from_config
 from models.rl_agent.agent import PolicyAgent, PolicyAgentConfig
-from PongGame.env import GameEnvironment
+from PongGame.env import PongEnv
+
 
 @click.command()
-@click.option('--config', help='Config for generation', metavar='YAML', type=str, required=True, default="config/rl.yaml")
-@click.option('--model', help='Path to save model', type=str, required=True, default="saved")
-@click.option('--dataset', help='Path to save dataset', type=str, required=False, default="dataset")
-@click.option('--record', help='Record actions and snapshots', is_flag=True)
-@click.option('--clear-dataset', help='Clear dataset folder', is_flag=True, required=False, default=False)
-@click.option('--show-plot', help='Show plot', is_flag=True, required=False, default=False)
-@click.option('--last-checkpoint', help='Path of checkpoint to resume the training', type=str, required=False)
-@click.option('--max-games', help='Maximum number of games to train for', type=int, required=False, default=None)
+@click.option('--config', type=str, default="config/rl.yaml", show_default=True,
+              help='YAML config path')
+@click.option('--model', type=str, default="saved", show_default=True,
+              help='Path to save model checkpoint')
+@click.option('--last-checkpoint', type=str, default=None, help='Resume from checkpoint')
+@click.option('--num-envs', type=int, default=5, show_default=True,
+              help='Number of parallel Gymnasium envs')
+@click.option('--rollout-steps', type=int, default=256, show_default=True,
+              help='Steps per env per PPO update')
+@click.option('--max-games', type=int, default=None, help='Stop after N completed games')
+@click.option('--show-plot', is_flag=True, help='Save training loss plot at end')
+@click.option('--no-replay', is_flag=True, help='Skip best-episode replay at end')
+@click.option('--seed', type=int, default=0, show_default=True)
 def main(**kwargs):
     options = EasyDict(kwargs)
     with open(options.config, 'r') as f:
         config = EasyDict(**yaml.safe_load(f))
-    env: GameEnvironment = instantiate_from_config(config.env)
+
     policy_agent_config = PolicyAgentConfig(**instantiate_from_config(config.policy_agent))
-    policy_agent = PolicyAgent(env, policy_agent_config, options.model, options.dataset, options.get("last_checkpoint", None))
-    policy_agent.train(options.show_plot, options.record, options.clear_dataset, options.get("max_games", None))
+    sample_env = PongEnv(seed=options.seed)
+    agent = PolicyAgent(
+        env=sample_env,
+        config=policy_agent_config,
+        model_path=options.model,
+        last_checkpoint=options.last_checkpoint,
+    )
+
+    agent.train(
+        num_envs=options.num_envs,
+        rollout_steps=options.rollout_steps,
+        show_plot=options.show_plot,
+        max_games=options.max_games,
+        replay_best=not options.no_replay,
+        base_seed=options.seed,
+    )
+
 
 if __name__ == "__main__":
     main()
