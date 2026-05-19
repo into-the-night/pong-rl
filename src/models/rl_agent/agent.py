@@ -58,6 +58,7 @@ class PolicyAgentConfig:
     entropy_coef: float = 0.01
     max_grad_norm: float = 0.5
     ppo_epochs: int = 4
+    mini_batch_size: int = 64
     train_every_iteration: int = 1
     save_every_iteration: Optional[int] = None
 
@@ -99,7 +100,7 @@ class PolicyAgent:
             lr=config.lr, gamma=config.gamma, gae_lambda=config.gae_lambda,
             clip_epsilon=config.clip_epsilon, value_loss_coef=config.value_loss_coef,
             entropy_coef=config.entropy_coef, max_grad_norm=config.max_grad_norm,
-            ppo_epochs=config.ppo_epochs,
+            ppo_epochs=config.ppo_epochs, mini_batch_size=config.mini_batch_size,
         )
 
         self.obs_dim = obs_dim

@@ -57,8 +57,8 @@ class ValueNetwork(nn.Module):
 class PPOTrainer:
     """PPO Trainer with clipped surrogate objective and GAE"""
     def __init__(
-        self, 
-        actor: nn.Module, 
+        self,
+        actor: nn.Module,
         critic: nn.Module,
         lr: float = 3e-4,
         gamma: float = 0.99,
@@ -67,7 +67,8 @@ class PPOTrainer:
         value_loss_coef: float = 0.5,
         entropy_coef: float = 0.01,
         max_grad_norm: float = 0.5,
-        ppo_epochs: int = 4
+        ppo_epochs: int = 4,
+        mini_batch_size: int = 64,
     ):
         self.actor = actor
         self.critic = critic
@@ -80,8 +81,9 @@ class PPOTrainer:
         self.ppo_epochs = ppo_epochs
         
         # Use Adam optimizer for both networks
+        self.mini_batch_size = mini_batch_size
         self.optimizer = torch.optim.Adam(
-            list(actor.parameters()) + list(critic.parameters()), 
+            list(actor.parameters()) + list(critic.parameters()),
             lr=lr
         )
 
@@ -257,45 +259,66 @@ class PPOTrainer:
         if advantages.std() > 1e-4:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
+        n = states.shape[0]
+        mb = self.mini_batch_size
         loss_info = {}
+
         for epoch in range(self.ppo_epochs):
-            action_probs = self.actor(states)
-            dist = torch.distributions.Categorical(action_probs)
-            new_log_probs = dist.log_prob(actions)
-            entropy = dist.entropy().mean()
-            new_values = self.critic(states)
+            idx = torch.randperm(n)
+            epoch_pol, epoch_val, epoch_ent, epoch_tot = 0.0, 0.0, 0.0, 0.0
+            num_batches = 0
 
-            ratio = torch.exp(new_log_probs - old_log_probs)
-            surr1 = ratio * advantages
-            surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages
-            policy_loss = -torch.min(surr1, surr2).mean()
+            for start in range(0, n, mb):
+                b = idx[start:start + mb]
+                s = states[b]
+                a = actions[b]
+                olp = old_log_probs[b]
+                adv = advantages[b]
+                ret = returns[b]
+                ov = old_values[b]
 
-            value_pred_clipped = old_values + torch.clamp(
-                new_values - old_values, -self.clip_epsilon, self.clip_epsilon
-            )
-            v_loss_unclipped = (new_values - returns) ** 2
-            v_loss_clipped = (value_pred_clipped - returns) ** 2
-            value_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
+                action_probs = self.actor(s)
+                dist = torch.distributions.Categorical(action_probs)
+                new_log_probs = dist.log_prob(a)
+                entropy = dist.entropy().mean()
+                new_values = self.critic(s)
 
-            loss = policy_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
+                ratio = torch.exp(new_log_probs - olp)
+                surr1 = ratio * adv
+                surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * adv
+                policy_loss = -torch.min(surr1, surr2).mean()
+
+                value_pred_clipped = ov + torch.clamp(new_values - ov, -self.clip_epsilon, self.clip_epsilon)
+                v_loss_unclipped = (new_values - ret) ** 2
+                v_loss_clipped = (value_pred_clipped - ret) ** 2
+                value_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
+
+                loss = policy_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(
+                    list(self.actor.parameters()) + list(self.critic.parameters()),
+                    self.max_grad_norm,
+                )
+                self.optimizer.step()
+
+                epoch_pol += policy_loss.item()
+                epoch_val += value_loss.item()
+                epoch_ent += entropy.item()
+                epoch_tot += loss.item()
+                num_batches += 1
 
             if epoch == 0:
                 loss_info = {
-                    'policy_loss': policy_loss.item(),
-                    'value_loss': value_loss.item(),
-                    'entropy': entropy.item(),
-                    'total_loss': loss.item(),
+                    'policy_loss': epoch_pol / num_batches,
+                    'value_loss': epoch_val / num_batches,
+                    'entropy': epoch_ent / num_batches,
+                    'total_loss': epoch_tot / num_batches,
                     'raw_adv_mean': raw_adv_mean,
                     'raw_adv_std': raw_adv_std,
                 }
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(
-                list(self.actor.parameters()) + list(self.critic.parameters()),
-                self.max_grad_norm
-            )
-            self.optimizer.step()
         return loss_info
 
 
